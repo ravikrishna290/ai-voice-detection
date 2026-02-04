@@ -1,59 +1,53 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 import base64
 import tempfile
 import os
 import librosa
 import numpy as np
+from typing import Optional
 
 # =========================
 # CONFIG
 # =========================
 API_KEY = "test123"
-MAX_BASE64_SIZE = 1_000_000 # ~750KB (GUVI safe limit)
+MAX_BASE64_SIZE = 1_000_000  # ~750 KB (GUVI-safe)
 
-app = FastAPI(
-    title="AI-Generated Voice Detection API",
-    version="1.0"
-)
+app = FastAPI(title="AI-Generated Voice Detection API")
 
 # =========================
-# ROOT (IMPORTANT FOR GUVI)
-# =========================
-@app.get("/")
-def root():
-    return {
-        "status": "running",
-        "service": "AI-Generated Voice Detection API",
-        "docs": "/docs"
-    }
-
-# =========================
-# REQUEST SCHEMA (GUVI FORMAT)
+# REQUEST SCHEMA (GUVI SAFE)
 # =========================
 class VoiceRequest(BaseModel):
     language: str
-    audio_format: str
-    audio_base64: str
+
+    # GUVI may send camelCase
+    audio_format: Optional[str] = None
+    audioFormat: Optional[str] = None
+
+    audio_base64: Optional[str] = None
+    audioBase64: Optional[str] = None
+
     message: Optional[str] = None
 
+
 # =========================
-# BASE64 → TEMP AUDIO
+# BASE64 → TEMP AUDIO FILE
 # =========================
 def decode_base64_audio(audio_base64: str, audio_format: str) -> str:
     if len(audio_base64) > MAX_BASE64_SIZE:
-        raise ValueError("Audio too large for processing")
+        raise ValueError("Audio too large")
 
     try:
         audio_bytes = base64.b64decode(audio_base64)
     except Exception:
-        raise ValueError("Invalid Base64 audio data")
+        raise ValueError("Invalid Base64 audio")
 
     suffix = f".{audio_format.lower()}"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(audio_bytes)
         return tmp.name
+
 
 # =========================
 # AI vs HUMAN DETECTION
@@ -88,6 +82,19 @@ def detect_ai_or_human(audio, sr):
             "Natural pitch variation and speech irregularities detected"
         )
 
+
+# =========================
+# HEALTH CHECK (IMPORTANT)
+# =========================
+@app.get("/")
+def root():
+    return {
+        "status": "running",
+        "service": "AI Voice Detection API",
+        "docs": "/docs"
+    }
+
+
 # =========================
 # MAIN ENDPOINT (GUVI)
 # =========================
@@ -100,19 +107,29 @@ def detect_voice(
     if not x_api_key or x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+    # -------- NORMALIZE GUVI FIELDS --------
+    audio_format = data.audio_format or data.audioFormat
+    audio_base64 = data.audio_base64 or data.audioBase64
+
+    if not audio_format or not audio_base64:
+        raise HTTPException(
+            status_code=400,
+            detail="audio_format and audio_base64 are required"
+        )
+
     audio_path = None
 
     try:
-        audio_path = decode_base64_audio(
-            data.audio_base64,
-            data.audio_format
-        )
+        # Decode audio
+        audio_path = decode_base64_audio(audio_base64, audio_format)
 
+        # Load audio
         audio, sr = librosa.load(audio_path, sr=16000)
 
         if len(audio) < sr:
             raise ValueError("Audio too short")
 
+        # Detect AI vs Human
         prediction, confidence, explanation = detect_ai_or_human(audio, sr)
 
         return {
