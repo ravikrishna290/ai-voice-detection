@@ -11,9 +11,11 @@ from typing import Optional
 # CONFIG
 # =========================
 API_KEY = "test123"
-MAX_BASE64_SIZE = 1_000_000  # ~750 KB (GUVI-safe)
 
-app = FastAPI(title="AI-Generated Voice Detection API")
+app = FastAPI(
+    title="AI-Generated Voice Detection API",
+    version="1.0"
+)
 
 # =========================
 # REQUEST SCHEMA (GUVI SAFE)
@@ -21,7 +23,7 @@ app = FastAPI(title="AI-Generated Voice Detection API")
 class VoiceRequest(BaseModel):
     language: str
 
-    # GUVI may send camelCase
+    # GUVI sometimes uses camelCase
     audio_format: Optional[str] = None
     audioFormat: Optional[str] = None
 
@@ -35,9 +37,6 @@ class VoiceRequest(BaseModel):
 # BASE64 → TEMP AUDIO FILE
 # =========================
 def decode_base64_audio(audio_base64: str, audio_format: str) -> str:
-    if len(audio_base64) > MAX_BASE64_SIZE:
-        raise ValueError("Audio too large")
-
     try:
         audio_bytes = base64.b64decode(audio_base64)
     except Exception:
@@ -120,16 +119,13 @@ def detect_voice(
     audio_path = None
 
     try:
-        # Decode audio
         audio_path = decode_base64_audio(audio_base64, audio_format)
 
-        # Load audio
         audio, sr = librosa.load(audio_path, sr=16000)
 
         if len(audio) < sr:
             raise ValueError("Audio too short")
 
-        # Detect AI vs Human
         prediction, confidence, explanation = detect_ai_or_human(audio, sr)
 
         return {
